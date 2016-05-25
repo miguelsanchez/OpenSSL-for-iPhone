@@ -21,9 +21,10 @@
 ###########################################################################
 #  Change values here                                                     #
 #                                                                         #
-VERSION="1.0.2h"                                                          #
+VERSION="1.0.1t"                                                          #
 IOS_SDKVERSION=`xcrun -sdk iphoneos --show-sdk-version`                   #
 TVOS_SDKVERSION=`xcrun -sdk appletvos --show-sdk-version`                 #
+OSX_SDKVERSION=`xcrun -sdk macosx --show-sdk-version`                     #
 CONFIG_OPTIONS=""                                                         #
 CURL_OPTIONS=""                                                           #
 
@@ -51,10 +52,12 @@ spinner()
 }
 
 CURRENTPATH=`pwd`
-ARCHS="i386 x86_64 armv7 armv7s arm64 tv_x86_64 tv_arm64"
+ARCHS=""
+ARCHS="osx_x86_64 osx_i386 i386 x86_64 armv7 armv7s arm64 tv_x86_64 tv_arm64"
 DEVELOPER=`xcode-select -print-path`
 IOS_MIN_SDK_VERSION="7.0"
 TVOS_MIN_SDK_VERSION="9.0"
+OSX_MIN_SDK_VERSION="10.9"
 
 if [ ! -d "$DEVELOPER" ]; then
   echo "xcode path is not set correctly $DEVELOPER does not exist"
@@ -98,19 +101,30 @@ do
   if [[ "$ARCH" == tv* ]]; then
     SDKVERSION=$TVOS_SDKVERSION
     MIN_SDK_VERSION=$TVOS_MIN_SDK_VERSION
+  elif [[ "${ARCH}" == osx* ]]; then
+    echo "OSX"
+    SDKVERSION=$OSX_SDKVERSION
+    MIN_SDK_VERSION=$OSX_MIN_SDK_VERSION
   else
+    echo "${ARCH}"
     SDKVERSION=$IOS_SDKVERSION
     MIN_SDK_VERSION=$IOS_MIN_SDK_VERSION
   fi
 
   if [[ "${ARCH}" == "i386" || "${ARCH}" == "x86_64" ]]; then
     PLATFORM="iPhoneSimulator"
-  elif [ "${ARCH}" == "tv_x86_64" ]; then
+  elif [[ "${ARCH}" == "tv_x86_64" ]]; then
     ARCH="x86_64"
     PLATFORM="AppleTVSimulator"
-  elif [ "${ARCH}" == "tv_arm64" ]; then
+  elif [[ "${ARCH}" == "tv_arm64" ]]; then
     ARCH="arm64"
     PLATFORM="AppleTVOS"
+  elif [[ "${ARCH}" == "osx_x86_64" ]]; then
+    ARCH="x86_64"
+    PLATFORM="MACOSX"
+  elif [[ "${ARCH}" == "osx_i386" ]]; then
+    ARCH="i386"
+    PLATFORM="MACOSX"
   else
     PLATFORM="iPhoneOS"
   fi
@@ -165,12 +179,16 @@ do
   if [ "$1" == "verbose" ]; then
     if [ "${ARCH}" == "x86_64" ]; then
       ./Configure no-asm darwin64-x86_64-cc --openssldir="${CURRENTPATH}/bin/${PLATFORM}${SDKVERSION}-${ARCH}.sdk" ${LOCAL_CONFIG_OPTIONS}
+    elif [[ "$ARCH" == "i386" &&  "${PLATFORM}" == "MACOSX" ]]; then
+      ./Configure no-asm darwin-i386-cc --openssldir="${CURRENTPATH}/bin/${PLATFORM}${SDKVERSION}-${ARCH}.sdk" ${LOCAL_CONFIG_OPTIONS}
     else
       ./Configure iphoneos-cross --openssldir="${CURRENTPATH}/bin/${PLATFORM}${SDKVERSION}-${ARCH}.sdk" ${LOCAL_CONFIG_OPTIONS}
     fi
   else
     if [ "${ARCH}" == "x86_64" ]; then
       (./Configure no-asm darwin64-x86_64-cc --openssldir="${CURRENTPATH}/bin/${PLATFORM}${SDKVERSION}-${ARCH}.sdk" ${LOCAL_CONFIG_OPTIONS} > "${LOG}" 2>&1) & spinner
+    elif [[ "$ARCH" == "i386" &&  "${PLATFORM}" == "MACOSX" ]]; then
+      (./Configure no-asm darwin-i386-cc --openssldir="${CURRENTPATH}/bin/${PLATFORM}${SDKVERSION}-${ARCH}.sdk" ${LOCAL_CONFIG_OPTIONS} > "${LOG}" 2>&1) & spinner
     else
       (./Configure iphoneos-cross --openssldir="${CURRENTPATH}/bin/${PLATFORM}${SDKVERSION}-${ARCH}.sdk" ${LOCAL_CONFIG_OPTIONS} > "${LOG}" 2>&1) & spinner
     fi
@@ -185,8 +203,10 @@ do
   # add -isysroot to CC=
   if [[ "${PLATFORM}" == "AppleTVSimulator" || "${PLATFORM}" == "AppleTVOS" ]]; then
     sed -ie "s!^CFLAG=!CFLAG=-isysroot ${CROSS_TOP}/SDKs/${CROSS_SDK} -mtvos-version-min=${TVOS_MIN_SDK_VERSION} !" "Makefile"
-  else
+  elif [[ "${PLATFORM}" == "iPhoneSimulator" || "${PLATFORM}" == "iPhoneOS" ]]; then
     sed -ie "s!^CFLAG=!CFLAG=-isysroot ${CROSS_TOP}/SDKs/${CROSS_SDK} -miphoneos-version-min=${MIN_SDK_VERSION} !" "Makefile"
+  else
+    sed -ie "s!^CFLAG=!CFLAG=-isysroot ${CROSS_TOP}/SDKs/${CROSS_SDK} -mmacosx-version-min=${OSX_MIN_SDK_VERSION} !" "Makefile"
   fi
 
   echo "  Make...\c"
@@ -246,6 +266,16 @@ lipo -create \
   ${CURRENTPATH}/bin/AppleTVSimulator${TVOS_SDKVERSION}-x86_64.sdk/lib/libcrypto.a \
   ${CURRENTPATH}/bin/AppleTVOS${TVOS_SDKVERSION}-arm64.sdk/lib/libcrypto.a \
   -output ${CURRENTPATH}/lib/libcrypto-tvOS.a
+
+echo "Build library for OS X..."
+lipo -create \
+  ${CURRENTPATH}/bin/MACOSX${OSX_SDKVERSION}-x86_64.sdk/lib/libssl.a \
+  ${CURRENTPATH}/bin/MACOSX${OSX_SDKVERSION}-i386.sdk/lib/libssl.a \
+  -output ${CURRENTPATH}/lib/libssl-OSX.a
+lipo -create \
+  ${CURRENTPATH}/bin/MACOSX${OSX_SDKVERSION}-x86_64.sdk/lib/libcrypto.a \
+  ${CURRENTPATH}/bin/MACOSX${OSX_SDKVERSION}-i386.sdk/lib/libcrypto.a \
+  -output ${CURRENTPATH}/lib/libcrypto-OSX.a
 
 mkdir -p ${CURRENTPATH}/include
 cp -R ${CURRENTPATH}/bin/iPhoneSimulator${IOS_SDKVERSION}-x86_64.sdk/include/openssl ${CURRENTPATH}/include/
